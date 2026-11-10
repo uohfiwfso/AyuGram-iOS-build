@@ -650,7 +650,8 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                 hasAutoremove: item.message.isSelfExpiring,
                 canViewReactionList: canViewMessageReactionList(message: EngineMessage(item.message)),
                 animationCache: item.controllerInteraction.presentationContext.animationCache,
-                animationRenderer: item.controllerInteraction.presentationContext.animationRenderer
+                animationRenderer: item.controllerInteraction.presentationContext.animationRenderer,
+                ayuGramMark: ayuGramMessageMark(for: item.message),
             ))
             
             let (dateAndStatusSize, dateAndStatusApply) = statusSuggestedWidthAndContinue.1(statusSuggestedWidthAndContinue.0)
@@ -1019,7 +1020,11 @@ public class ChatMessageStickerItemNode: ChatMessageItemView {
                     
                     strongSelf.appliedForwardInfo = ChatMessageAppliedForwardInfo(messageId: item.message.id, source: forwardSource, authorSignature: forwardAuthorSignature)
                     strongSelf.updateAccessibilityData(accessibilityData)
-                    
+
+                    // AyuGram: a message that was deleted but kept in the chat is drawn faded.
+                    let ayuGramDeleted = MessageSavingBridge.isDeletedPlaceholder(message: item.message)
+                    strongSelf.contextSourceNode.contentNode.alpha = ayuGramDeleted ? 0.55 : 1.0
+
                     strongSelf.updateAttachedDateHeader(hasDate: dateHeaderAtBottom.hasDate, hasPeer: dateHeaderAtBottom.hasTopic)
                     
                     transition.updateFrame(node: strongSelf.imageNode, frame: updatedImageFrame)

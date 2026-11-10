@@ -1153,7 +1153,8 @@ public final class ChatMessageInteractiveMediaNode: ASDisplayNode, GalleryItemTr
                     hasAutoremove: message.isSelfExpiring,
                     canViewReactionList: canViewMessageReactionList(message: EngineMessage(message)),
                     animationCache: presentationContext.animationCache,
-                    animationRenderer: presentationContext.animationRenderer
+                    animationRenderer: presentationContext.animationRenderer,
+                    ayuGramMark: ayuGramMessageMark(for: message),
                 ))
                 
                 let (size, apply) = statusSuggestedWidthAndContinue.1(statusSuggestedWidthAndContinue.0)

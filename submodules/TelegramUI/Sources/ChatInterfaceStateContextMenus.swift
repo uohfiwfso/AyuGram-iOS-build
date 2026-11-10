@@ -1204,6 +1204,16 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             })))
             if !SGSimpleSettings.shared.contextShowReply { sgActions.append(actions.removeLast()) } // MARK: Swiftgram
         }
+
+        // AyuGram: the edit history of this message — every version of it that we kept.
+        if messages.count == 1, MessageSavingStore.hasEdits(accountPeerId: context.account.peerId.toInt64(), peerId: message.id.peerId.toInt64(), messageId: message.id.id, namespace: message.id.namespace) {
+            actions.append(.action(ContextMenuActionItem(text: "View History", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Archive"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                f(.dismissWithoutContent)
+                controllerInteraction.navigationController()?.pushViewController(messageSavingEditsController(context: context, messageId: message.id))
+            })))
+        }
         
         if data.messageActions.options.contains(.sendGift), !message.id.peerId.isTelegramNotifications {
             let sendGiftTitle: String

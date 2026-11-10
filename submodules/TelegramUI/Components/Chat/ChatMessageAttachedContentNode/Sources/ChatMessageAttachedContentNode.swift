@@ -782,7 +782,8 @@ public final class ChatMessageAttachedContentNode: ASDisplayNode {
                                 hasAutoremove: message.isSelfExpiring,
                                 canViewReactionList: canViewMessageReactionList(message: EngineMessage(message)),
                                 animationCache: controllerInteraction.presentationContext.animationCache,
-                                animationRenderer: controllerInteraction.presentationContext.animationRenderer
+                                animationRenderer: controllerInteraction.presentationContext.animationRenderer,
+                                ayuGramMark: ayuGramMessageMark(for: message),
                             ))
                             statusLayoutAndContinue = statusLayoutAndContinueValue
                             actualWidth = max(actualWidth, statusLayoutAndContinueValue.0)

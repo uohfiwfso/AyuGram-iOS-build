@@ -93,7 +93,7 @@ public final class AyuGramSettings {
 
     /// The mark shown in front of a message that was edited.
     public var editedMark: String {
-        get { self.string(Key.editedMark, default: "") }
+        get { self.string(Key.editedMark, default: MessageSavingBridge.defaultEditedMark) }
         set { self.defaults.set(newValue, forKey: Key.editedMark) }
     }
 

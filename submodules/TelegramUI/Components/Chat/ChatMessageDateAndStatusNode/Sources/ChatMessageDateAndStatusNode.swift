@@ -270,6 +270,9 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
         var canViewReactionList: Bool
         var animationCache: AnimationCache
         var animationRenderer: MultiAnimationRenderer
+        /// AyuGram: the mark shown in front of the time — the broom for a deleted message, the
+        /// pencil for an edited one. Nil keeps Telegram's own look.
+        var ayuGramMark: String?
         
         public init(
             context: AccountContext,
@@ -295,7 +298,8 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
             hasAutoremove: Bool,
             canViewReactionList: Bool,
             animationCache: AnimationCache,
-            animationRenderer: MultiAnimationRenderer
+            animationRenderer: MultiAnimationRenderer,
+            ayuGramMark: String? = nil
         ) {
             self.context = context
             self.presentationData = presentationData
@@ -321,6 +325,7 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
             self.canViewReactionList = canViewReactionList
             self.animationCache = animationCache
             self.animationRenderer = animationRenderer
+            self.ayuGramMark = ayuGramMark
         }
     }
     
@@ -605,15 +610,22 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
             }
             
             var updatedDateText = arguments.dateText
+            var updatedDatePrefix = ""
             if arguments.edited {
                 if let useEditedTimestamp = arguments.context.getAppConfigValue("message_primary_edited_date") as? Bool, useEditedTimestamp {
-                } else {
-                    updatedDateText = "\(arguments.presentationData.strings.Conversation_MessageEditedLabel) \(updatedDateText)"
+                } else if arguments.ayuGramMark == nil {
+                    updatedDatePrefix += "\(arguments.presentationData.strings.Conversation_MessageEditedLabel) "
                 }
             }
             if let impressionCount = arguments.impressionCount {
-                updatedDateText = compactNumericCountString(impressionCount, decimalSeparator: arguments.presentationData.dateTimeFormat.decimalSeparator) + " " + updatedDateText
+                updatedDatePrefix += compactNumericCountString(impressionCount, decimalSeparator: arguments.presentationData.dateTimeFormat.decimalSeparator) + " "
             }
+            if let mark = arguments.ayuGramMark, !mark.isEmpty {
+                // AyuGram: the mark sits right in front of the time, the way the deleted and
+                // edited markers look in AyuGram Android.
+                updatedDatePrefix += "\(mark) "
+            }
+            updatedDateText = updatedDatePrefix + updatedDateText
             
             let dateFont = Font.regular(floor(arguments.presentationData.fontSize.baseDisplaySize * 11.0 / 17.0))
             let (date, dateApply) = dateLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: updatedDateText, font: dateFont, textColor: dateColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: arguments.constrainedSize, alignment: .natural, cutout: nil, insets: UIEdgeInsets()))

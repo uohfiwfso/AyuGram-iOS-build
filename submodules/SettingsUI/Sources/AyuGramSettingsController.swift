@@ -22,6 +22,8 @@ private final class AyuGramSettingsArguments {
     let updateSaveForBots: (Bool) -> Void
     let updateSaveMyDeleted: (Bool) -> Void
     let updateShowDeletedInChat: (Bool) -> Void
+    let updateDeletedMark: (String) -> Void
+    let updateEditedMark: (String) -> Void
     let updateMaxMediaFileSize: (String) -> Void
     let updateMaxMediaStorage: (String) -> Void
     let openDeletedMessages: () -> Void
@@ -34,6 +36,8 @@ private final class AyuGramSettingsArguments {
         updateSaveForBots: @escaping (Bool) -> Void,
         updateSaveMyDeleted: @escaping (Bool) -> Void,
         updateShowDeletedInChat: @escaping (Bool) -> Void,
+        updateDeletedMark: @escaping (String) -> Void,
+        updateEditedMark: @escaping (String) -> Void,
         updateMaxMediaFileSize: @escaping (String) -> Void,
         updateMaxMediaStorage: @escaping (String) -> Void,
         openDeletedMessages: @escaping () -> Void,
@@ -45,6 +49,8 @@ private final class AyuGramSettingsArguments {
         self.updateSaveForBots = updateSaveForBots
         self.updateSaveMyDeleted = updateSaveMyDeleted
         self.updateShowDeletedInChat = updateShowDeletedInChat
+        self.updateDeletedMark = updateDeletedMark
+        self.updateEditedMark = updateEditedMark
         self.updateMaxMediaFileSize = updateMaxMediaFileSize
         self.updateMaxMediaStorage = updateMaxMediaStorage
         self.openDeletedMessages = openDeletedMessages
@@ -59,6 +65,8 @@ private enum AyuGramSettingsEntry: ItemListNodeEntry {
     case saveForBots(Bool)
     case saveMyDeleted(Bool)
     case showDeletedInChat(Bool)
+    case deletedMark(String)
+    case editedMark(String)
     case deletedMessages(Int)
     case maxMediaFileSize(String)
     case maxMediaStorage(String)
@@ -66,7 +74,7 @@ private enum AyuGramSettingsEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .saveDeleted, .saveEdits, .saveMedia, .saveForBots, .saveMyDeleted, .showDeletedInChat:
+        case .saveDeleted, .saveEdits, .saveMedia, .saveForBots, .saveMyDeleted, .showDeletedInChat, .deletedMark, .editedMark:
             return AyuGramSettingsSection.saving.rawValue
         case .deletedMessages:
             return AyuGramSettingsSection.history.rawValue
@@ -91,6 +99,10 @@ private enum AyuGramSettingsEntry: ItemListNodeEntry {
             return 4
         case .showDeletedInChat:
             return 5
+        case .deletedMark:
+            return 10
+        case .editedMark:
+            return 11
         case .deletedMessages:
             return 6
         case .maxMediaFileSize:
@@ -133,6 +145,18 @@ private enum AyuGramSettingsEntry: ItemListNodeEntry {
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Show deleted messages in chat", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateShowDeletedInChat(value)
             })
+        case let .deletedMark(value):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "Deleted mark", textColor: presentationData.theme.list.itemPrimaryTextColor), text: value, placeholder: "🧹", type: .regular(capitalization: false, autocorrection: false), sectionId: self.section, textUpdated: { updatedText in
+                arguments.updateDeletedMark(updatedText)
+            }, action: {
+                arguments.refresh()
+            }, dismissKeyboardOnEnter: true)
+        case let .editedMark(value):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "Edited mark", textColor: presentationData.theme.list.itemPrimaryTextColor), text: value, placeholder: "✏️", type: .regular(capitalization: false, autocorrection: false), sectionId: self.section, textUpdated: { updatedText in
+                arguments.updateEditedMark(updatedText)
+            }, action: {
+                arguments.refresh()
+            }, dismissKeyboardOnEnter: true)
         case let .deletedMessages(count):
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Deleted messages", label: "\(count)", sectionId: self.section, style: .blocks, action: {
                 arguments.openDeletedMessages()
@@ -192,6 +216,12 @@ public func ayuGramSettingsController(context: AccountContext) -> ViewController
             settings.showDeletedInChat = value
             updateTrigger.set(.single(true))
         },
+        updateDeletedMark: { value in
+            settings.deletedMark = value
+        },
+        updateEditedMark: { value in
+            settings.editedMark = value
+        },
         updateMaxMediaFileSize: { value in
             // The value is written while typing, but the list is only rebuilt when the user
             // confirms — rebuilding on every keystroke would tear the text field down.
@@ -228,6 +258,8 @@ public func ayuGramSettingsController(context: AccountContext) -> ViewController
             .saveForBots(settings.saveForBots),
             .saveMyDeleted(settings.saveMyDeleted),
             .showDeletedInChat(settings.showDeletedInChat),
+            .deletedMark(settings.deletedMark),
+            .editedMark(settings.editedMark),
             .deletedMessages(MessageSavingStore.recordCount),
             .maxMediaFileSize("\(settings.maxMediaFileSizeMB)"),
             .maxMediaStorage("\(settings.maxMediaStorageMB)"),

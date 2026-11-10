@@ -973,7 +973,8 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                         hasAutoremove: arguments.message.isSelfExpiring,
                         canViewReactionList: canViewMessageReactionList(message: EngineMessage(arguments.topMessage)),
                         animationCache: arguments.controllerInteraction.presentationContext.animationCache,
-                        animationRenderer: arguments.controllerInteraction.presentationContext.animationRenderer
+                        animationRenderer: arguments.controllerInteraction.presentationContext.animationRenderer,
+                        ayuGramMark: ayuGramMessageMark(for: arguments.message),
                     ))
                 }
                 

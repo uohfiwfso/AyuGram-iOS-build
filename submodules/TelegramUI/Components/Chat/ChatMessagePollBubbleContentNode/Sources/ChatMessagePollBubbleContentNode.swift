@@ -2772,7 +2772,8 @@ public class ChatMessagePollBubbleContentNode: ChatMessageBubbleContentNode {
                         hasAutoremove: item.message.isSelfExpiring,
                         canViewReactionList: canViewMessageReactionList(message: EngineMessage(item.topMessage)),
                         animationCache: item.controllerInteraction.presentationContext.animationCache,
-                        animationRenderer: item.controllerInteraction.presentationContext.animationRenderer
+                        animationRenderer: item.controllerInteraction.presentationContext.animationRenderer,
+                        ayuGramMark: ayuGramMessageMark(for: item.message),
                     ))
                 }
                 

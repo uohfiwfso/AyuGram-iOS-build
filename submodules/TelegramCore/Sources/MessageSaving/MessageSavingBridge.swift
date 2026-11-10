@@ -134,7 +134,7 @@ public struct MessageSavingBridgeSettings: Equatable {
     /// Total size the saved attachments may occupy, in bytes. 0 = no limit.
     public var maxMediaStorage: Int64
 
-    public init(saveDeleted: Bool, saveEdits: Bool, saveForBots: Bool, saveMedia: Bool = false, proactiveSaveMedia: Bool = false, deletedMark: String = MessageSavingBridge.defaultDeletedMark, editedMark: String = "", saveMyDeleted: Bool = false, showDeletedInChat: Bool = true, maxMediaFileSize: Int64 = 32 * 1024 * 1024, maxMediaStorage: Int64 = 512 * 1024 * 1024) {
+    public init(saveDeleted: Bool, saveEdits: Bool, saveForBots: Bool, saveMedia: Bool = false, proactiveSaveMedia: Bool = false, deletedMark: String = MessageSavingBridge.defaultDeletedMark, editedMark: String = MessageSavingBridge.defaultEditedMark, saveMyDeleted: Bool = false, showDeletedInChat: Bool = true, maxMediaFileSize: Int64 = 32 * 1024 * 1024, maxMediaStorage: Int64 = 512 * 1024 * 1024) {
         self.saveDeleted = saveDeleted
         self.saveEdits = saveEdits
         self.saveForBots = saveForBots
@@ -150,15 +150,18 @@ public struct MessageSavingBridgeSettings: Equatable {
 
     /// Matches the AyuGram defaults so the engine does not capture deletes/edits
     /// before SharedAccountContext's async sharedData subscription applies persisted prefs.
-    public static let defaults = MessageSavingBridgeSettings(saveDeleted: false, saveEdits: false, saveForBots: false, saveMedia: false, proactiveSaveMedia: false, deletedMark: MessageSavingBridge.defaultDeletedMark, editedMark: "")
+    public static let defaults = MessageSavingBridgeSettings(saveDeleted: false, saveEdits: false, saveForBots: false, saveMedia: false, proactiveSaveMedia: false, deletedMark: MessageSavingBridge.defaultDeletedMark, editedMark: MessageSavingBridge.defaultEditedMark)
 
-    public static let disabled = MessageSavingBridgeSettings(saveDeleted: false, saveEdits: false, saveForBots: false, saveMedia: false, proactiveSaveMedia: false, deletedMark: MessageSavingBridge.defaultDeletedMark, editedMark: "")
+    public static let disabled = MessageSavingBridgeSettings(saveDeleted: false, saveEdits: false, saveForBots: false, saveMedia: false, proactiveSaveMedia: false, deletedMark: MessageSavingBridge.defaultDeletedMark, editedMark: MessageSavingBridge.defaultEditedMark)
 }
 
 /// TelegramCore cannot import TelegramUIPreferences; SharedAccountContext pushes settings + append sink here.
 public enum MessageSavingBridge {
     /// AyuGram Android default deleted mark (`AyuConstants.DEFAULT_DELETED_MARK`).
     public static let defaultDeletedMark = "🧹"
+
+    /// Default mark for an edited message — a pencil, shown next to the timestamp.
+    public static let defaultEditedMark = "✏️"
 
     /// The switches the interceptor works with, read live from `AyuGramSettings`.
     ///
@@ -363,51 +366,35 @@ public enum MessageSavingBridge {
 
     // MARK: - In-chat "deleted" placeholder
 
-    /// The label used when a deleted message had no text of its own (a photo, a sticker, …).
+    /// Whether the message is one of our deleted placeholders.
     ///
-    /// TelegramCore cannot reach the app's presentation strings, so the system language is the
-    /// best available approximation — Telegram itself follows the system language by default.
-    private static var deletedPlaceholderLabel: String {
-        for language in Locale.preferredLanguages.map({ $0.lowercased() }) {
-            if language.hasPrefix("ru") || language.hasPrefix("uk") || language.hasPrefix("be") {
-                return "Сообщение удалено"
-            }
-            if language.hasPrefix("en") {
-                return "Message deleted"
-            }
-        }
-        return "Message deleted"
-    }
-
-    /// Whether the given text is one of our deleted placeholders.
+    /// The placeholder is marked with an attribute rather than with a text prefix: the prefix
+    /// would have to be stripped again before the message is shown, and a user message that
+    /// happens to start with the same characters would be mistaken for a placeholder.
     ///
-    /// Used to tell "a message that was already marked as deleted" from "a message that is being
-    /// deleted right now" — the second one must be snapshotted, the first one must not be
-    /// snapshotted again (that would store the placeholder instead of the original text).
-    public static func isDeletedPlaceholder(text: String) -> Bool {
-        let mark = deletedMark
-        if text.hasPrefix("\(mark) ") {
+    /// The text prefix is still recognised for compatibility with the M3 build, which marked
+    /// deleted messages that way.
+    public static func isDeletedPlaceholder(message: Message) -> Bool {
+        if message.attributes.contains(where: { $0 is AyuGramDeletedMessageAttribute }) {
             return true
         }
-        // The mark may have been changed after the placeholder was written; the default one is
-        // still a reliable marker.
-        return text.hasPrefix("\(defaultDeletedMark) ")
+        let text = message.text
+        return text.hasPrefix("\(deletedMark) ") || text.hasPrefix("\(defaultDeletedMark) ")
     }
 
     /// Replaces the given messages with an in-chat "deleted" placeholder.
     ///
-    /// AyuGram Android keeps the bubble in the conversation and marks it with the broom instead
-    /// of removing it, so the deletion stays visible where it happened. The message object itself
-    /// is kept (same id, same position, same author) — only its text is prefixed with the mark,
-    /// exactly like the original message would be shown with a prefix.
+    /// AyuGram Android keeps the bubble in the conversation and marks it as deleted instead of
+    /// removing it, so the deletion stays visible where it happened. The message object itself is
+    /// kept (same id, same position, same author, same attachments) — it only gets the
+    /// `AyuGramDeletedMessageAttribute`, which the UI uses to draw it faded and to show the mark
+    /// next to the timestamp.
     ///
     /// Returns the ids that are placeholders now; the caller must not delete those.
     public static func replaceWithDeletedPlaceholders(transaction: Transaction, messageIds: [MessageId]) -> Set<MessageId> {
         var placeholders: Set<MessageId> = []
         let current = settings.with { $0 }
         guard current.showDeletedInChat else { return placeholders }
-        let mark = deletedMark
-        let label = deletedPlaceholderLabel
 
         for id in messageIds {
             guard let message = transaction.getMessage(id) else { continue }
@@ -415,7 +402,7 @@ public enum MessageSavingBridge {
             // them would only be noise.
             guard id.namespace != Namespaces.Message.EphemeralLocal else { continue }
             guard shouldShowPlaceholder(message: message) else { continue }
-            if isDeletedPlaceholder(text: message.text) {
+            if isDeletedPlaceholder(message: message) {
                 // Already marked (the delete arrived twice) — keep it, but do not touch it again.
                 placeholders.insert(id)
                 continue
@@ -427,22 +414,11 @@ public enum MessageSavingBridge {
                 }
                 var updatedLocalTags = currentMessage.localTags
                 updatedLocalTags.remove(.OutgoingLiveLocation)
-                let baseText = currentMessage.text
-                let updatedText = baseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "\(mark) \(label)" : "\(mark) \(baseText)"
-                // The text grew by the mark, so the entity ranges (UTF-16 offsets, as Telegram
-                // uses them) have to move with it — otherwise a link or a bold run would end up
-                // pointing at the wrong part of the message.
                 var updatedAttributes = currentMessage.attributes
-                let shift = mark.utf16.count + 1
-                if let attributeIndex = updatedAttributes.firstIndex(where: { $0 is TextEntitiesMessageAttribute }), let attribute = updatedAttributes[attributeIndex] as? TextEntitiesMessageAttribute {
-                    var entities = attribute.entities
-                    for entityIndex in entities.indices {
-                        let range = entities[entityIndex].range
-                        entities[entityIndex].range = (range.lowerBound + shift)..<(range.upperBound + shift)
-                    }
-                    updatedAttributes[attributeIndex] = TextEntitiesMessageAttribute(entities: entities)
+                if !updatedAttributes.contains(where: { $0 is AyuGramDeletedMessageAttribute }) {
+                    updatedAttributes.append(AyuGramDeletedMessageAttribute())
                 }
-                return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: updatedLocalTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: updatedText, attributes: updatedAttributes, media: currentMessage.media))
+                return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: updatedLocalTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: updatedAttributes, media: currentMessage.media))
             })
             placeholders.insert(id)
         }
@@ -611,7 +587,7 @@ public enum MessageSavingBridge {
             guard shouldSave(message: message, settings: current) else { continue }
             // A message that is already a deleted placeholder was snapshotted when it was deleted;
             // taking it again would store "🧹 original text" instead of the original text.
-            guard !isDeletedPlaceholder(text: message.text) else { continue }
+            guard !isDeletedPlaceholder(message: message) else { continue }
             guard let text = displayText(for: message) else { continue }
 
             var mediaPath: String?
@@ -658,7 +634,7 @@ public enum MessageSavingBridge {
         }
         guard let sink = append.with({ $0 }) else { return }
         guard shouldSave(message: message, settings: current) else { return }
-        guard !isDeletedPlaceholder(text: message.text) else { return }
+        guard !isDeletedPlaceholder(message: message) else { return }
         guard let text = displayText(for: message) else { return }
 
         var mediaPath: String?

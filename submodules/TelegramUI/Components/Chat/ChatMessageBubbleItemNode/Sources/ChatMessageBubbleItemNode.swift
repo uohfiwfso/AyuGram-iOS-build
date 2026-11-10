@@ -2810,7 +2810,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                     hasAutoremove: message.isSelfExpiring,
                     canViewReactionList: canViewMessageReactionList(message: EngineMessage(message)),
                     animationCache: item.controllerInteraction.presentationContext.animationCache,
-                    animationRenderer: item.controllerInteraction.presentationContext.animationRenderer
+                    animationRenderer: item.controllerInteraction.presentationContext.animationRenderer,
+                    ayuGramMark: ayuGramMessageMark(for: item.message),
                 ))
                 
                 mosaicStatusSizeAndApply = statusSuggestedWidthAndContinue.1(statusSuggestedWidthAndContinue.0)
@@ -4058,6 +4059,12 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         strongSelf.appliedItem = item
         strongSelf.appliedForwardInfo = ChatMessageAppliedForwardInfo(messageId: item.content.firstMessage.id, source: forwardSource, authorSignature: forwardAuthorSignature)
         strongSelf.updateAccessibilityData(accessibilityData)
+
+        // AyuGram: a message that was deleted but kept in the chat is drawn faded, so the
+        // deletion is visible right where it happened instead of the message just vanishing.
+        let ayuGramDeleted = MessageSavingBridge.isDeletedPlaceholder(message: item.message)
+        strongSelf.clippingNode.alpha = ayuGramDeleted ? 0.55 : 1.0
+        strongSelf.backgroundNode.alpha = ayuGramDeleted ? 0.55 : 1.0
         strongSelf.disablesComments = disablesComments
         
         strongSelf.authorNameColor = authorNameColor
