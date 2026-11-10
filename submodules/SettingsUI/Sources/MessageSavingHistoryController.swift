@@ -12,6 +12,30 @@ import ItemListPeerItem
 import LocalizedPeerData
 import TelegramStringFormatting
 
+/// AyuGram: язык наших строк. Telegram генерирует ключи локализации в своём
+/// кодогенераторе, а для пары фраз экрана проще определить их здесь.
+enum ForkPresentationLanguage {
+    /// Русский интерфейс — по языку устройства.
+    static var prefersRussianStrings: Bool {
+        return Locale.preferredLanguages.first?.lowercased().hasPrefix("ru") == true
+    }
+}
+
+/// AyuGram: строки экрана сохранённых сообщений (удалённые / правки).
+enum ForkMessageSavingStrings {
+    private static func pick(_ en: String, _ ru: String) -> String {
+        return ForkPresentationLanguage.prefersRussianStrings ? ru : en
+    }
+    static var loading: String { pick("Loading...", "Загрузка...") }
+    static var readError: String { pick("Couldn't read the saved messages", "Не удалось прочитать сохранённые сообщения") }
+    static var viewDeleted: String { pick("View Deleted", "Удалённые сообщения") }
+    static var noDeleted: String { pick("No deleted messages here", "Удалённых сообщений здесь нет") }
+    static var editHistory: String { pick("Edit History", "История правок") }
+    static var noEdits: String { pick("This message was never edited", "Это сообщение никогда не правилось") }
+    static var retry: String { pick("Retry", "Повторить") }
+    static var clearDeleted: String { pick("Clear Deleted Messages", "Очистить удалённые сообщения") }
+}
+
 private enum MessageSavingHistoryMode {
     case deleted(peerId: EnginePeer.Id, topicId: Int64?)
     case edits(peerId: EnginePeer.Id, messageId: EngineMessage.Id)
