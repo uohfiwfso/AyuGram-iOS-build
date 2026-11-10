@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - ayugram
+      - feature/message-saving
 
 concurrency:
   group: ayugram-${{ github.ref }}
@@ -32,6 +33,8 @@ jobs:
     timeout-minutes: 300
     env:
       BUILD_CONFIGURATION: release_arm64
+      AYU_API_ID: ${{ secrets.AYU_API_ID }}
+      AYU_API_HASH: ${{ secrets.AYU_API_HASH }}
       BAZEL_USER_ROOT: /private/var/tmp/_bazel_ayugram
       BAZEL_CACHE_DIR: /private/var/tmp/ayugram-bazel-cache
     steps:
@@ -62,6 +65,19 @@ jobs:
               ;;
           esac
           python3 -c "import json,sys;p='versions.json';d=json.load(open(p));d['bazel']=d['bazel'].split(':')[0]+':'+sys.argv[1];json.dump(d,open(p,'w'),indent=4);print('bazel pin:',d['bazel'])" "$SHA"
+
+      - name: Apply personal api_id / api_hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Telegram's own api_id (8) is shared by thousands of clients and gets
+          # rate-limited for unofficial builds. A personal api_id/api_hash from
+          # my.telegram.org -> API development tools is passed as a repository secret.
+          if [ -n "${AYU_API_ID:-}" ] && [ -n "${AYU_API_HASH:-}" ]; then
+            python3 -c "import json,os;p='build-system/ayu-configuration.json';d=json.load(open(p));d['api_id']=os.environ['AYU_API_ID'];d['api_hash']=os.environ['AYU_API_HASH'];json.dump(d,open(p,'w'),indent='\t');print('api_id ->',d['api_id'])"
+          else
+            echo "::warning::AYU_API_ID/AYU_API_HASH are not set — building with the shared public api_id"
+          fi
 
       - name: Select Xcode
         shell: bash
