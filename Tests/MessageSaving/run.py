@@ -23,6 +23,7 @@ public final class ValuePromise<T> {
 }
 enum MessageSavingBridge {
     static var savedAttachmentsDirectory = URL(fileURLWithPath: "/unused")
+    static func enforceAttachmentBudget() {}
 }
 final class Logger {
     static let shared = Logger()
