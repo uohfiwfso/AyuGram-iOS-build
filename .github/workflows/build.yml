@@ -1,0 +1,169 @@
+name: Build AyuGram IPA/tipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ayugram
+
+concurrency:
+  group: ayugram-${{ github.ref }}
+  # false: a new push must not kill a build that is already deep in the compile — its log
+  # is what tells us what else is broken.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Release build (${{ matrix.runner }})
+    # The xcode-27 image (macOS 27, arm64) is the only hosted image with Xcode 27.1, and
+    # Swiftgram master needs it: the code calls UIView.reservedRegions, an iOS 27.1 SDK API,
+    # so Xcode 26.x cannot compile it at all.
+    # The plain macos-* images are capacity-constrained right now and GitHub kills a job
+    # that waits in their queue for more than ~15 minutes.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - xcode-27
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    env:
+      BUILD_CONFIGURATION: release_arm64
+      BAZEL_USER_ROOT: /private/var/tmp/_bazel_ayugram
+      BAZEL_CACHE_DIR: /private/var/tmp/ayugram-bazel-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Pin bazel for this runner architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          # versions.json pins the SHA256 of the arm64 bazel binary. The build script
+          # downloads the binary that matches the host and compares it against that pin,
+          # so on an Intel runner it deletes the x86_64 download and dies. Swap in the
+          # hash of the binary that belongs to this machine.
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            arm64)
+              SHA="dd466352a3e4d3581b8898740ee1ff208866ccbe25f8d367c5dcb950219587e6"
+              ;;
+            x86_64)
+              SHA="14c9bcb01303b38192e0e2895051c1bcf19bf89d7e416f5aeeeb48b6b624cfbf"
+              ;;
+            *)
+              echo "::error::unknown runner architecture ${ARCH}"
+              exit 1
+              ;;
+          esac
+          python3 -c "import json,sys;p='versions.json';d=json.load(open(p));d['bazel']=d['bazel'].split(':')[0]+':'+sys.argv[1];json.dump(d,open(p,'w'),indent=4);print('bazel pin:',d['bazel'])" "$SHA"
+
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          WANTED="$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')"
+          SELECTED=""
+          if [ -d "/Applications/Xcode_${WANTED}.app" ]; then
+            SELECTED="/Applications/Xcode_${WANTED}.app"
+          else
+            # The pinned Xcode is not on this image; the image default can be much older
+            # (macos-15 defaults to Xcode 16.4), so take the newest one that is installed.
+            SELECTED="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
+            echo "::warning::Xcode ${WANTED} is not on this image; using ${SELECTED}"
+          fi
+          if [ -z "$SELECTED" ]; then
+            echo "::error::no Xcode found on this image"
+            exit 1
+          fi
+          sudo xcode-select -s "$SELECTED/Contents/Developer"
+          xcodebuild -version
+          swift --version || true
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf \
+            /Users/runner/Library/Developer/CoreSimulator/Caches \
+            /Users/runner/Library/Developer/CoreSimulator/Devices \
+            /Users/runner/Library/Android \
+            /usr/local/lib/android \
+            /Users/runner/Library/Caches/CocoaPods \
+            /Users/runner/Library/Caches/Homebrew || true
+          df -h /
+
+      - name: Build IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_NUMBER="$(( $(git rev-list --count HEAD) + $(cat build_number_offset) ))"
+          echo "build number: ${BUILD_NUMBER}"
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          python3 -u build-system/Make/Make.py \
+            --overrideXcodeVersion \
+            --bazelUserRoot="$BAZEL_USER_ROOT" \
+            --cacheDir="$BAZEL_CACHE_DIR" \
+            build \
+            --configurationPath=build-system/ayu-configuration.json \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --configuration="$BUILD_CONFIGURATION" \
+            --buildNumber="$BUILD_NUMBER" \
+            --disableExtensions \
+            --continueOnError \
+            --outputBuildArtifactsPath="$GITHUB_WORKSPACE/build/artifacts" \
+            2>&1 | tee build.log
+
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "### compiler errors"
+            grep -E '(^| )error:' build.log | tail -30 || true
+            echo "### undefined symbols"
+            grep -B2 -A10 'Undefined symbols for' build.log | tail -40 || true
+            echo "### linker errors"
+            grep -E 'ld: |duplicate symbol|file was built for' build.log | tail -20 || true
+            echo "### tail of the build log"
+            tail -40 build.log
+          } || true
+
+      - name: Collect IPA and pack tipa
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          SRC="$(find build/artifacts bazel-bin bazel-out -name '*.ipa' -type f 2>/dev/null | head -1 || true)"
+          if [ -z "$SRC" ]; then
+            echo "::error::no IPA was produced"
+            exit 1
+          fi
+          echo "source ipa: ${SRC}"
+          cp -f "$SRC" "artifacts/AyuGram.ipa"
+          cp -f "$SRC" "artifacts/AyuGram.tipa"
+          echo "### tipa layout"
+          unzip -l "artifacts/AyuGram.tipa" | head -15
+          echo "### bundle id / entitlements"
+          TMP="$(mktemp -d)"
+          unzip -q -o "artifacts/AyuGram.tipa" -d "$TMP"
+          APP="$(find "$TMP/Payload" -maxdepth 1 -name '*.app' | head -1)"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" || true
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP/Info.plist" || true
+          codesign -d --entitlements - "$APP" 2>/dev/null || true
+          ls -lh artifacts
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: AyuGram-ipa-${{ matrix.runner }}
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: error
