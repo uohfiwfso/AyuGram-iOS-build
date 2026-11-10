@@ -30,6 +30,76 @@ enum MessageSavingAttachments {
         return cachedDirectoryURL
     }
 
+    /// Largest attachment that may be saved, in bytes. 0 means "no limit".
+    ///
+    /// Read live from the settings, so lowering the limit takes effect on the next message
+    /// instead of on the next launch.
+    static var maxFileSize: Int64 {
+        return MessageSavingBridge.settings.with { $0.maxMediaFileSize }
+    }
+
+    /// Total size the saved attachments may occupy, in bytes. 0 means "no limit".
+    static var maxTotalSize: Int64 {
+        return MessageSavingBridge.settings.with { $0.maxMediaStorage }
+    }
+
+    /// Size of a file on disk, in bytes. 0 when it cannot be determined.
+    private static func fileSize(atPath path: String) -> Int64 {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return 0
+        }
+        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// Total size of the saved attachments, in bytes.
+    static func totalSize() -> Int64 {
+        let fileManager = FileManager.default
+        guard let urls = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.fileSizeKey]) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for url in urls {
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+            total += Int64(values?.fileSize ?? 0)
+        }
+        return total
+    }
+
+    /// Drop the oldest saved attachments until the folder fits into the configured budget.
+    ///
+    /// The records in the store stay — only the file copies go, so "View Deleted" still lists the
+    /// message, just without its attachment. The file that was just written is never dropped.
+    static func enforceStorageBudget(keeping protectedPath: String?) {
+        let budget = maxTotalSize
+        guard budget > 0 else { return }
+        ioQueue.async {
+            let fileManager = FileManager.default
+            guard let urls = try? fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]) else {
+                return
+            }
+            var entries: [(url: URL, size: Int64, date: Date)] = []
+            var total: Int64 = 0
+            for url in urls {
+                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                let size = Int64(values?.fileSize ?? 0)
+                entries.append((url, size, values?.contentModificationDate ?? .distantPast))
+                total += size
+            }
+            guard total > budget else { return }
+            for entry in entries.sorted(by: { $0.date < $1.date }) {
+                if total <= budget {
+                    break
+                }
+                if let protectedPath, entry.url.path == protectedPath {
+                    continue
+                }
+                try? fileManager.removeItem(at: entry.url)
+                total -= entry.size
+            }
+            MessageSavingBridge.log("attachments: trimmed the saved attachments folder to \(total / (1024 * 1024)) MB")
+        }
+    }
+
     /// Stable across launches, unlike String.hashValue which is per-process seeded.
     private static func stableHash(_ string: String) -> UInt64 {
         var hash: UInt64 = 0xcbf29ce484222325
@@ -110,6 +180,7 @@ enum MessageSavingAttachments {
                 return
             }
             try? FileManager.default.copyItem(atPath: source, toPath: dest.path)
+            enforceStorageBudget(keeping: dest.path)
         }
         return dest.path
     }
@@ -140,6 +211,7 @@ enum MessageSavingAttachments {
         let dest = destinationURL(message: message, source: source, mediaBox: mediaBox)
         do {
             try FileManager.default.copyItem(atPath: source, toPath: dest.path)
+            enforceStorageBudget(keeping: dest.path)
             return dest.path
         } catch {
             // Lost a race with a concurrent copy of the same message — that is still success.
@@ -151,24 +223,35 @@ enum MessageSavingAttachments {
     }
 
     private static func sourcePath(message: Message, mediaBox: MediaBox) -> String? {
+        // A file bigger than the configured limit is not worth keeping: it would eat the whole
+        // storage budget on its own. 0 disables the limit.
+        let limit = maxFileSize
         for media in message.effectiveMedia {
             if let image = media as? TelegramMediaImage {
                 let reps = image.representations.sorted { ($0.dimensions.width * $0.dimensions.height) > ($1.dimensions.width * $1.dimensions.height) }
                 for rep in reps {
                     if let path = mediaBox.completedResourcePath(rep.resource) {
-                        return path
+                        if limit <= 0 || fileSize(atPath: path) <= limit {
+                            return path
+                        }
                     }
                 }
             } else if let file = media as? TelegramMediaFile {
                 if let path = mediaBox.completedResourcePath(file.resource, pathExtension: file.fileName.flatMap { ($0 as NSString).pathExtension }) {
-                    return path
+                    if limit <= 0 || fileSize(atPath: path) <= limit {
+                        return path
+                    }
                 }
                 if let path = mediaBox.completedResourcePath(file.resource) {
-                    return path
+                    if limit <= 0 || fileSize(atPath: path) <= limit {
+                        return path
+                    }
                 }
                 for rep in file.previewRepresentations {
                     if let path = mediaBox.completedResourcePath(rep.resource) {
-                        return path
+                        if limit <= 0 || fileSize(atPath: path) <= limit {
+                            return path
+                        }
                     }
                 }
             }
@@ -200,7 +283,11 @@ enum MessageSavingAttachments {
     /// messages nobody looked at. Above the ceiling the preserve still happens — it just
     /// waits for the file to arrive some other way (the user opening it, auto-download)
     /// instead of paying for it up front.
-    static let proactiveFetchSizeLimit: Int64 = 32 * 1024 * 1024
+    ///
+    /// The ceiling is the user's "max attachment size" setting; 0 means no limit.
+    static var proactiveFetchSizeLimit: Int64 {
+        return maxFileSize
+    }
 
     /// AyuGram Android parity: actively pull a not-yet-local resource instead of only waiting
     /// for whatever else happens to be downloading it. Fire-and-forget: the returned disposable

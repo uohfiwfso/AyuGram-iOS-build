@@ -4622,16 +4622,19 @@ func replayFinalState(
             case let .DeleteEphemeralMessages(peerId, ids):
                 deleteEphemeralMessages(transaction: transaction, peerId: peerId, ids: ids)
             case let .DeleteMessagesWithGlobalIds(ids):
+                let messageIds = transaction.messageIdsForGlobalIds(ids)
                 // AyuGram: keep a copy of every deleted message before it goes away.
                 MessageSavingBridge.snapshotMessages(
                     transaction: transaction,
                     accountPeerId: accountPeerId,
-                    messageIds: transaction.messageIdsForGlobalIds(ids),
+                    messageIds: messageIds,
                     kind: .deleted,
                     mediaBox: mediaBox
                 )
+                // AyuGram: keep the bubble in the chat, marked as deleted, instead of removing it.
+                let placeholders = MessageSavingBridge.replaceWithDeletedPlaceholders(transaction: transaction, messageIds: messageIds)
                 var resourceIds: [MediaResourceId] = []
-                transaction.deleteMessagesWithGlobalIds(ids, forEachMedia: { media in
+                transaction.deleteMessages(messageIds.filter { !placeholders.contains($0) }, forEachMedia: { media in
                     addMessageMediaResourceIdsToRemove(media: media, resourceIds: &resourceIds)
                 })
                 if !resourceIds.isEmpty {
@@ -4647,7 +4650,9 @@ func replayFinalState(
                     kind: .deleted,
                     mediaBox: mediaBox
                 )
-                _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
+                // AyuGram: keep the bubble in the chat, marked as deleted, instead of removing it.
+                let placeholders = MessageSavingBridge.replaceWithDeletedPlaceholders(transaction: transaction, messageIds: ids)
+                _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids.filter { !placeholders.contains($0) }, manualAddMessageThreadStatsDifference: { id, add, remove in
                     addMessageThreadStatsDifference(threadKey: id, remove: remove, addedMessagePeer: nil, addedMessageId: nil, isOutgoing: false)
                 })
                 deletedMessageIds.append(contentsOf: ids.map { .messageId($0) })

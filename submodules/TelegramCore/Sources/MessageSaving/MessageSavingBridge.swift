@@ -127,8 +127,14 @@ public struct MessageSavingBridgeSettings: Equatable {
     public var editedMark: String
     /// Also keep the user's own messages that they delete on this device (they still leave the chat).
     public var saveMyDeleted: Bool
+    /// Leave a "deleted" placeholder bubble in the chat instead of removing the message.
+    public var showDeletedInChat: Bool
+    /// Largest attachment that may be saved, in bytes. 0 = no limit.
+    public var maxMediaFileSize: Int64
+    /// Total size the saved attachments may occupy, in bytes. 0 = no limit.
+    public var maxMediaStorage: Int64
 
-    public init(saveDeleted: Bool, saveEdits: Bool, saveForBots: Bool, saveMedia: Bool = false, proactiveSaveMedia: Bool = false, deletedMark: String = MessageSavingBridge.defaultDeletedMark, editedMark: String = "", saveMyDeleted: Bool = false) {
+    public init(saveDeleted: Bool, saveEdits: Bool, saveForBots: Bool, saveMedia: Bool = false, proactiveSaveMedia: Bool = false, deletedMark: String = MessageSavingBridge.defaultDeletedMark, editedMark: String = "", saveMyDeleted: Bool = false, showDeletedInChat: Bool = true, maxMediaFileSize: Int64 = 32 * 1024 * 1024, maxMediaStorage: Int64 = 512 * 1024 * 1024) {
         self.saveDeleted = saveDeleted
         self.saveEdits = saveEdits
         self.saveForBots = saveForBots
@@ -137,6 +143,9 @@ public struct MessageSavingBridgeSettings: Equatable {
         self.deletedMark = deletedMark
         self.editedMark = editedMark
         self.saveMyDeleted = saveMyDeleted
+        self.showDeletedInChat = showDeletedInChat
+        self.maxMediaFileSize = maxMediaFileSize
+        self.maxMediaStorage = maxMediaStorage
     }
 
     /// Matches the AyuGram defaults so the engine does not capture deletes/edits
@@ -168,6 +177,19 @@ public enum MessageSavingBridge {
     /// is about to delete really lives inside it.
     public static var savedAttachmentsDirectory: URL {
         return MessageSavingAttachments.directoryURL
+    }
+
+    /// Total size of the saved attachments, in bytes.
+    public static var savedAttachmentsSize: Int64 {
+        return MessageSavingAttachments.totalSize()
+    }
+
+    /// Bring the saved attachments back under the configured budget.
+    ///
+    /// Called after the budget is lowered and once per launch, so a folder that outgrew the
+    /// limit (or a limit that was lowered afterwards) shrinks on its own.
+    public static func enforceAttachmentBudget() {
+        MessageSavingAttachments.enforceStorageBudget(keeping: nil)
     }
 
     /// Current customizable deleted-message mark (AyuGramSettings.deletedMark). Falls back to
@@ -339,6 +361,105 @@ public enum MessageSavingBridge {
         return settings.with { $0.saveDeleted }
     }
 
+    // MARK: - In-chat "deleted" placeholder
+
+    /// The label used when a deleted message had no text of its own (a photo, a sticker, …).
+    ///
+    /// TelegramCore cannot reach the app's presentation strings, so the system language is the
+    /// best available approximation — Telegram itself follows the system language by default.
+    private static var deletedPlaceholderLabel: String {
+        for language in Locale.preferredLanguages.map({ $0.lowercased() }) {
+            if language.hasPrefix("ru") || language.hasPrefix("uk") || language.hasPrefix("be") {
+                return "Сообщение удалено"
+            }
+            if language.hasPrefix("en") {
+                return "Message deleted"
+            }
+        }
+        return "Message deleted"
+    }
+
+    /// Whether the given text is one of our deleted placeholders.
+    ///
+    /// Used to tell "a message that was already marked as deleted" from "a message that is being
+    /// deleted right now" — the second one must be snapshotted, the first one must not be
+    /// snapshotted again (that would store the placeholder instead of the original text).
+    public static func isDeletedPlaceholder(text: String) -> Bool {
+        let mark = deletedMark
+        if text.hasPrefix("\(mark) ") {
+            return true
+        }
+        // The mark may have been changed after the placeholder was written; the default one is
+        // still a reliable marker.
+        return text.hasPrefix("\(defaultDeletedMark) ")
+    }
+
+    /// Replaces the given messages with an in-chat "deleted" placeholder.
+    ///
+    /// AyuGram Android keeps the bubble in the conversation and marks it with the broom instead
+    /// of removing it, so the deletion stays visible where it happened. The message object itself
+    /// is kept (same id, same position, same author) — only its text is prefixed with the mark,
+    /// exactly like the original message would be shown with a prefix.
+    ///
+    /// Returns the ids that are placeholders now; the caller must not delete those.
+    public static func replaceWithDeletedPlaceholders(transaction: Transaction, messageIds: [MessageId]) -> Set<MessageId> {
+        var placeholders: Set<MessageId> = []
+        let current = settings.with { $0 }
+        guard current.showDeletedInChat else { return placeholders }
+        let mark = deletedMark
+        let label = deletedPlaceholderLabel
+
+        for id in messageIds {
+            guard let message = transaction.getMessage(id) else { continue }
+            // Ephemeral (view-once) and local messages expire on their own; a placeholder for
+            // them would only be noise.
+            guard id.namespace != Namespaces.Message.EphemeralLocal else { continue }
+            guard shouldShowPlaceholder(message: message) else { continue }
+            if isDeletedPlaceholder(text: message.text) {
+                // Already marked (the delete arrived twice) — keep it, but do not touch it again.
+                placeholders.insert(id)
+                continue
+            }
+            transaction.updateMessage(id, update: { currentMessage in
+                var storeForwardInfo: StoreMessageForwardInfo?
+                if let forwardInfo = currentMessage.forwardInfo {
+                    storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature, psaType: forwardInfo.psaType, flags: forwardInfo.flags)
+                }
+                var updatedLocalTags = currentMessage.localTags
+                updatedLocalTags.remove(.OutgoingLiveLocation)
+                let baseText = currentMessage.text
+                let updatedText = baseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "\(mark) \(label)" : "\(mark) \(baseText)"
+                // The text grew by the mark, so the entity ranges (UTF-16 offsets, as Telegram
+                // uses them) have to move with it — otherwise a link or a bold run would end up
+                // pointing at the wrong part of the message.
+                var updatedAttributes = currentMessage.attributes
+                let shift = mark.utf16.count + 1
+                if let attributeIndex = updatedAttributes.firstIndex(where: { $0 is TextEntitiesMessageAttribute }), let attribute = updatedAttributes[attributeIndex] as? TextEntitiesMessageAttribute {
+                    var entities = attribute.entities
+                    for entityIndex in entities.indices {
+                        let range = entities[entityIndex].range
+                        entities[entityIndex].range = (range.lowerBound + shift)..<(range.upperBound + shift)
+                    }
+                    updatedAttributes[attributeIndex] = TextEntitiesMessageAttribute(entities: entities)
+                }
+                return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: updatedLocalTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: updatedText, attributes: updatedAttributes, media: currentMessage.media))
+            })
+            placeholders.insert(id)
+        }
+        return placeholders
+    }
+
+    /// Whether a deleted message is worth keeping visible in the chat.
+    ///
+    /// Service messages ("X joined the group", "photo changed") carry no content of their own,
+    /// so a placeholder for them would be pure noise.
+    private static func shouldShowPlaceholder(message: Message) -> Bool {
+        if message.media.contains(where: { $0 is TelegramMediaAction }) && message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        return displayText(for: message) != nil || !message.effectiveMedia.isEmpty
+    }
+
     private static let preserveQueue = DispatchQueue(label: "MessageSavingBridge.preserve", qos: .utility)
 
     /// Identifies an in-flight preserve so a message that is opened / re-delivered repeatedly
@@ -488,6 +609,9 @@ public enum MessageSavingBridge {
         for id in messageIds {
             guard let message = transaction.getMessage(id) else { continue }
             guard shouldSave(message: message, settings: current) else { continue }
+            // A message that is already a deleted placeholder was snapshotted when it was deleted;
+            // taking it again would store "🧹 original text" instead of the original text.
+            guard !isDeletedPlaceholder(text: message.text) else { continue }
             guard let text = displayText(for: message) else { continue }
 
             var mediaPath: String?
@@ -534,6 +658,7 @@ public enum MessageSavingBridge {
         }
         guard let sink = append.with({ $0 }) else { return }
         guard shouldSave(message: message, settings: current) else { return }
+        guard !isDeletedPlaceholder(text: message.text) else { return }
         guard let text = displayText(for: message) else { return }
 
         var mediaPath: String?

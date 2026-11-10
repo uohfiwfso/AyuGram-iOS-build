@@ -162,7 +162,20 @@ func deleteMessagesInteractively(transaction: Transaction, stateManager: Account
             }
         }
     }
-    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: messageIds.map(\.messageId))
+    // AyuGram: keep a copy of the message before it leaves the chat, and leave a "deleted"
+    // placeholder in the chat instead of removing the bubble.
+    let localMessageIds = messageIds.map(\.messageId)
+    if let accountPeerId = stateManager?.accountPeerId {
+        MessageSavingBridge.snapshotMessages(
+            transaction: transaction,
+            accountPeerId: accountPeerId,
+            messageIds: localMessageIds,
+            kind: .deleted,
+            mediaBox: postbox.mediaBox
+        )
+    }
+    let placeholders = MessageSavingBridge.replaceWithDeletedPlaceholders(transaction: transaction, messageIds: localMessageIds)
+    _internal_deleteMessages(transaction: transaction, mediaBox: postbox.mediaBox, ids: localMessageIds.filter { !placeholders.contains($0) })
     
     stateManager?.notifyDeletedMessages(messageIds: messageIds.map(\.messageId))
     

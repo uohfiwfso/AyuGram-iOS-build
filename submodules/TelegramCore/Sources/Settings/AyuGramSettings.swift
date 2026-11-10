@@ -17,6 +17,9 @@ public final class AyuGramSettings {
         static let saveMyDeleted = "ayugram.saveMyDeleted"
         static let deletedMark = "ayugram.deletedMark"
         static let editedMark = "ayugram.editedMark"
+        static let showDeletedInChat = "ayugram.showDeletedInChat"
+        static let maxMediaFileSizeMB = "ayugram.maxMediaFileSizeMB"
+        static let maxMediaStorageMB = "ayugram.maxMediaStorageMB"
     }
 
     private let defaults: UserDefaults
@@ -34,6 +37,13 @@ public final class AyuGramSettings {
 
     private func string(_ key: String, default defaultValue: String) -> String {
         guard let value = defaults.string(forKey: key) else {
+            return defaultValue
+        }
+        return value
+    }
+
+    private func int(_ key: String, default defaultValue: Int) -> Int {
+        guard let value = defaults.object(forKey: key) as? Int else {
             return defaultValue
         }
         return value
@@ -87,6 +97,32 @@ public final class AyuGramSettings {
         set { self.defaults.set(newValue, forKey: Key.editedMark) }
     }
 
+    /// Leave a "deleted" placeholder bubble in the chat instead of removing the message.
+    ///
+    /// This is the AyuGram look: the bubble stays where it was, marked with the broom, so the
+    /// deletion is visible in the conversation itself and not only in the "View Deleted" list.
+    /// Independent of `saveDeleted`: the switch decides what is *kept on disk*, this one decides
+    /// what is *shown in the chat*.
+    public var showDeletedInChat: Bool {
+        get { self.bool(Key.showDeletedInChat, default: true) }
+        set { self.defaults.set(newValue, forKey: Key.showDeletedInChat) }
+    }
+
+    /// Largest attachment that may be saved, in megabytes. 0 means "no limit".
+    public var maxMediaFileSizeMB: Int {
+        get { max(0, self.int(Key.maxMediaFileSizeMB, default: 32)) }
+        set { self.defaults.set(max(0, newValue), forKey: Key.maxMediaFileSizeMB) }
+    }
+
+    /// Total size the saved attachments may occupy, in megabytes. 0 means "no limit".
+    ///
+    /// When the folder grows past this, the oldest saved attachments are dropped until it fits
+    /// again — the records themselves stay, only the file copies go.
+    public var maxMediaStorageMB: Int {
+        get { max(0, self.int(Key.maxMediaStorageMB, default: 512)) }
+        set { self.defaults.set(max(0, newValue), forKey: Key.maxMediaStorageMB) }
+    }
+
     /// The settings the message interceptor works with.
     public var messageSavingSettings: MessageSavingBridgeSettings {
         return MessageSavingBridgeSettings(
@@ -97,7 +133,10 @@ public final class AyuGramSettings {
             proactiveSaveMedia: self.proactiveSaveMedia,
             deletedMark: self.deletedMark,
             editedMark: self.editedMark,
-            saveMyDeleted: self.saveMyDeleted
+            saveMyDeleted: self.saveMyDeleted,
+            showDeletedInChat: self.showDeletedInChat,
+            maxMediaFileSize: Int64(self.maxMediaFileSizeMB) * 1024 * 1024,
+            maxMediaStorage: Int64(self.maxMediaStorageMB) * 1024 * 1024
         )
     }
 }

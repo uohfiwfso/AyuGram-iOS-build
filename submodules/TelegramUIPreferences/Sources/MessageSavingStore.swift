@@ -246,6 +246,8 @@ public enum MessageSavingStore {
         lock.unlock()
         queue.asyncAfter(deadline: .now() + 30.0) {
             self.removeStaleUnreferencedAttachments()
+            // AyuGram: the saved attachments also have to fit into the user's storage budget.
+            MessageSavingBridge.enforceAttachmentBudget()
         }
     }
 
