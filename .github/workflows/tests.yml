@@ -1,0 +1,51 @@
+name: AyuGram fast tests
+
+# Быстрый прогон логики фич без полной bazel-сборки приложения.
+# Полная сборка в build.yml занимает 40-70 минут; здесь — минуты.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/message-saving
+    paths:
+      - 'submodules/TelegramCore/Sources/MessageSaving/**'
+      - 'submodules/TelegramCore/Sources/BananaGhost*.swift'
+      - 'submodules/TelegramUIPreferences/Sources/MessageSaving*.swift'
+      - 'submodules/SettingsUI/Sources/MessageSavingHistoryController.swift'
+      - 'Tests/MessageSaving/**'
+
+concurrency:
+  group: ayugram-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fast-tests:
+    name: Message Saving / Ghost Mode unit tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          WANTED="$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')"
+          if [ -d "/Applications/Xcode_${WANTED}.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_${WANTED}.app/Contents/Developer"
+          fi
+          xcodebuild -version
+          swift --version
+
+      - name: Message Saving tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Tests/MessageSaving/run.py
+
+      # Ghost Mode (P3) is not ported yet; its test comes with it.
