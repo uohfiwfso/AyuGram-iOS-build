@@ -12,7 +12,10 @@ on:
       - 'submodules/TelegramCore/Sources/BananaGhost*.swift'
       - 'submodules/TelegramUIPreferences/Sources/MessageSaving*.swift'
       - 'submodules/SettingsUI/Sources/MessageSavingHistoryController.swift'
+      - 'submodules/TelegramUI/Sources/AyuGramPushSignal.swift'
+      - 'submodules/TelegramUI/Sources/AppDelegate.swift'
       - 'Tests/MessageSaving/**'
+      - 'Tests/PushSignal/**'
 
 concurrency:
   group: ayugram-tests-${{ github.ref }}
@@ -47,5 +50,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 Tests/MessageSaving/run.py
+
+      # Compiles the real Darwin push-signal receiver against the real SwiftSignalKit
+      # sources and prints the CoreFoundation signature the installed SDK exposes.
+      # Catches Swift errors in minutes instead of a 90-minute app build.
+      - name: Push signal receiver type-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Tests/PushSignal/run.py
 
       # Ghost Mode (P3) is not ported yet; its test comes with it.

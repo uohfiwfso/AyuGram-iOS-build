@@ -376,13 +376,6 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             self.regularDeviceToken.set(.single(token))
         })
         
-        // AyuGram: слушаем сигнал от твика AyuGramPushRelay (приход push в
-        // приложении, которое уже умеет push — Swiftgram / Telegram).
-        AyuGramPushSignal.shared.start()
-        AyuGramPushSignal.shared.setHandler { [weak self] in
-            self?.handleAyuGramPushSignal()
-        }
-        
         let launchStartTime = CFAbsoluteTimeGetCurrent()
         
         defaultNavigationBarImpl = { presentationData in
@@ -813,6 +806,16 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let logsPath = rootPath + "/logs/app-logs"
         let _ = try? FileManager.default.createDirectory(atPath: logsPath, withIntermediateDirectories: true, attributes: nil)
         Logger.setSharedLogger(Logger(rootPath: rootPath, basePath: logsPath))
+        
+        // AyuGram: слушаем сигнал от твика AyuGramPushRelay (приход push в
+        // приложении, которое уже умеет push — Swiftgram / Telegram).
+        // ВАЖНО: регистрация строго после Logger.setSharedLogger — до неё
+        // Logger.shared попадает в assertionFailure (Log.swift) и в debug-сборке
+        // роняет приложение на старте.
+        AyuGramPushSignal.shared.setHandler { [weak self] in
+            self?.handleAyuGramPushSignal()
+        }
+        AyuGramPushSignal.shared.start()
 
         setManagedAudioSessionLogger({ s in
             Logger.shared.log("ManagedAudioSession", s)
@@ -2280,27 +2283,50 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         Logger.shared.log("App \(self.episodeId)", "register for notifications: didFailToRegisterForRemoteNotificationsWithError (error: \(error))")
     }
     
+    // AYUGRAM-PUSH-SIGNAL-BEGIN
     /// AyuGram: реакция на Darwin-сигнал твика AyuGramPushRelay.
     /// Форсирует разницу с сервером, чтобы догнать обновления, пришедшие
     /// по push-каналу другого приложения, пока AyuGram был в фоне.
+    ///
+    /// Разбито на отдельные функции с явными типами: единая вложенная цепочка
+    /// замыканий роняла type-checker ("failed to produce diagnostic").
     private func handleAyuGramPushSignal() {
         let _ = (self.sharedContextPromise.get()
         |> take(1)
-        |> deliverOnMainQueue).start(next: { sharedContext in
-            let _ = (sharedContext.activeAccountContexts
-            |> take(1)
-            |> deliverOnMainQueue).start(next: { contexts in
-                guard let primary = contexts.primary else {
-                    return
-                }
-                let _ = primary.account.stateManager.standalonePollDifference().start(
-                    next: { _ in },
-                    error: { _ in },
-                    completed: {}
-                )
-            })
+        |> deliverOnMainQueue).start(next: { [weak self] sharedApplicationContext in
+            self?.pollAyuGramAccountDifference(sharedApplicationContext)
         })
     }
+    
+    /// AyuGram: достаёт primary-аккаунт из общего контекста приложения.
+    /// Путь `sharedContext.activeAccountContexts` — тот же, что и в основном
+    /// коде приложения (AppDelegate.swift, self.context).
+    private func pollAyuGramAccountDifference(_ sharedApplicationContext: SharedApplicationContext) {
+        let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
+        |> map { primary, _, _ -> AccountContext? in
+            return primary
+        }
+        |> take(1)
+        |> deliverOnMainQueue).start(next: { [weak self] primary in
+            guard let primary = primary else {
+                return
+            }
+            self?.pollAyuGramStandaloneDifference(primary.account)
+        })
+    }
+    
+    /// AyuGram: просит аккаунт догнать накопившуюся разницу с сервером.
+    private func pollAyuGramStandaloneDifference(_ account: Account) {
+        guard let stateManager = account.stateManager else {
+            return
+        }
+        let _ = stateManager.standalonePollDifference().start(
+            next: { _ in },
+            error: { _ in },
+            completed: {}
+        )
+    }
+    // AYUGRAM-PUSH-SIGNAL-END
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         let _ = (self.sharedContextPromise.get()
