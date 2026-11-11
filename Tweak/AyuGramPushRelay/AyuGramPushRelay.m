@@ -175,6 +175,16 @@ static BOOL AYUSwizzle(Class cls, SEL original, IMP replacement, IMP *outOrigina
     if (method == NULL) {
         return NO;
     }
+    IMP currentIMP = method_getImplementation(method);
+    // Уже захукано (например, конструктор и didFinishLaunching вызвали установку
+    // дважды) - второй раз подменять нельзя, иначе replacement укажет на сам
+    // же хук и получится бесконечная рекурсия.
+    if (currentIMP == replacement) {
+        if (outOriginal != NULL && *outOriginal == NULL) {
+            *outOriginal = currentIMP;
+        }
+        return YES;
+    }
     IMP originalIMP = method_setImplementation(method, replacement);
     if (originalIMP == NULL) {
         return NO;
@@ -226,5 +236,17 @@ static void AYUConstructor(void) {
     @autoreleasepool {
         AYULog(@"loaded into %@ (pid %d)", [[NSBundle mainBundle] bundleIdentifier] ?: @"?", getpid());
         AYUInstallHooks();
+
+        // Конструктор dylib выполняется до старта приложения, и класс AppDelegate
+        // может быть ещё не зарегистрирован в ObjC-реестре. Тогда первый вызов
+        // ничего не захукает, и релей молча не заработает. Поэтому ставим хуки
+        // ещё раз после запуска приложения - поздно, но до первого push.
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *_Nonnull note) {
+            AYULog(@"application did finish launching, installing hooks");
+            AYUInstallHooks();
+        }];
     }
 }
