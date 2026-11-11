@@ -1,0 +1,14 @@
+#!/bin/sh
+# Post-remove: после удаления твика интерфейс надо перезапустить, иначе
+# ElleKit продолжит грузить удалённый dylib из памяти.
+INSTALL_PREFIX="/var/jb"
+
+if [ -n "$CYDIA" ]; then
+    FD=$(echo "$CYDIA" | awk '{print $1}')
+    VER=$(echo "$CYDIA" | awk '{print $2}')
+    if [ "$VER" -ge 1 ] 2>/dev/null; then
+        echo "finish:restart" >&"$FD" 2>/dev/null
+    fi
+fi
+
+exit 0

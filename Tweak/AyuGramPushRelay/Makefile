@@ -3,6 +3,16 @@ TARGET = $(NAME).dylib
 BUILD_DIR = build
 INSTALL_DIR = /var/jb/Library/MobileSubstrate/DynamicLibraries
 
+# Rootless-раскладка: префикс /var/jb. Внутри .deb файлы лежат по путям
+# ./var/jb/... — так же устроены настоящие rootless-пакеты (проверено на
+# deb'ах из bootstrap Dopamine: basebin-link.deb, libroot.deb).
+ROOTLESS_PREFIX = /var/jb
+
+VERSION = 1.0.0
+DEB_NAME = $(NAME)_$(VERSION)_iphoneos-arm64.deb
+DEB_DIR = $(BUILD_DIR)/deb
+STAGE_DIR = $(DEB_DIR)/$(NAME)_$(VERSION)_iphoneos-arm64
+
 SDK = $(shell xcrun --sdk iphoneos --show-sdk-path)
 MIN_IOS = 15.0
 ARCHS = arm64 arm64e
@@ -14,7 +24,7 @@ CFLAGS = -fobjc-arc -Wall -Wno-unused-variable -Wno-objc-method-access \
 LDFLAGS = -dynamiclib -framework Foundation -framework UIKit -framework UserNotifications \
           -Wl,-install_name,@rpath/$(TARGET)
 
-.PHONY: all clean install
+.PHONY: all clean install deb
 
 all:
 	@mkdir -p $(BUILD_DIR)
@@ -30,3 +40,20 @@ install: all
 	cp $(BUILD_DIR)/$(TARGET) $(INSTALL_DIR)/
 	cp $(NAME).plist $(INSTALL_DIR)/
 	@echo "installed into $(INSTALL_DIR), now respring"
+
+# Сборка .deb для установки через Sileo/Zebra или dpkg -i.
+deb: all
+	@rm -rf $(DEB_DIR)
+	@mkdir -p $(STAGE_DIR)/DEBIAN
+	@mkdir -p $(STAGE_DIR)$(ROOTLESS_PREFIX)/Library/MobileSubstrate/DynamicLibraries
+	@install -m 644 $(BUILD_DIR)/$(TARGET) $(STAGE_DIR)$(ROOTLESS_PREFIX)/Library/MobileSubstrate/DynamicLibraries/$(TARGET)
+	@install -m 644 $(NAME).plist $(STAGE_DIR)$(ROOTLESS_PREFIX)/Library/MobileSubstrate/DynamicLibraries/$(NAME).plist
+	@install -m 644 packaging/control $(STAGE_DIR)/DEBIAN/control
+	@install -m 644 packaging/triggers $(STAGE_DIR)/DEBIAN/triggers
+	@install -m 755 packaging/postinst $(STAGE_DIR)/DEBIAN/postinst
+	@install -m 755 packaging/postrm $(STAGE_DIR)/DEBIAN/postrm
+	@mkdir -p $(STAGE_DIR)$(ROOTLESS_PREFIX)/usr/share/doc/$(NAME)
+	@install -m 644 README.md $(STAGE_DIR)$(ROOTLESS_PREFIX)/usr/share/doc/$(NAME)/README.md
+	@dpkg-deb --root-owner-group -b $(STAGE_DIR) $(DEB_DIR)/$(DEB_NAME)
+	@echo "built $(DEB_DIR)/$(DEB_NAME)"
+

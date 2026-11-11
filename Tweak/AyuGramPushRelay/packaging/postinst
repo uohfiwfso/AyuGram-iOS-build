@@ -1,0 +1,28 @@
+#!/bin/sh
+# Post-install: подписать dylib (если есть ldid) и перезапустить интерфейс,
+# чтобы ElleKit подхватил новый твик.
+#
+# Префикс /var/jb — rootless-раскладка (Dopamine / palera1n / ElleKit).
+# В самом .deb файлы лежат по путям ./var/jb/..., поэтому dpkg на устройстве
+# положит их в /var/jb/... без дополнительной обработки.
+
+INSTALL_PREFIX="/var/jb"
+DYLIB="$INSTALL_PREFIX/Library/MobileSubstrate/DynamicLibraries/AyuGramPushRelay.dylib"
+
+# ldid есть в bootstrap джейлбрейка. Если его нет - не критично:
+# dylib подписан ad-hoc на этапе сборки.
+if [ -x "$INSTALL_PREFIX/usr/bin/ldid" ] && [ -f "$DYLIB" ]; then
+    "$INSTALL_PREFIX/usr/bin/ldid" -S "$DYLIB" 2>/dev/null
+fi
+
+# Сообщить Sileo/Zebra, что нужен респринг.
+if [ -n "$CYDIA" ]; then
+    # Формат: "<fd> <version>"
+    FD=$(echo "$CYDIA" | awk '{print $1}')
+    VER=$(echo "$CYDIA" | awk '{print $2}')
+    if [ "$VER" -ge 1 ] 2>/dev/null; then
+        echo "finish:restart" >&"$FD" 2>/dev/null
+    fi
+fi
+
+exit 0

@@ -37,6 +37,16 @@ jobs:
           cp Tweak/AyuGramPushRelay/AyuGramPushRelay.plist package/
           cp Tweak/AyuGramPushRelay/README.md package/
 
+      # .deb для установки через Sileo/Zebra или dpkg -i.
+      # Пути внутри rootless-деба - ./var/jb/... (так же устроены настоящие
+      # rootless-пакеты: basebin-link.deb, libroot.deb из bootstrap Dopamine).
+      - name: Build deb
+        run: |
+          make -C Tweak/AyuGramPushRelay deb
+          cp Tweak/AyuGramPushRelay/build/deb/*.deb package/
+          dpkg-deb -I Tweak/AyuGramPushRelay/build/deb/*.deb
+          dpkg-deb -c Tweak/AyuGramPushRelay/build/deb/*.deb
+
       - uses: actions/upload-artifact@v4
         with:
           name: AyuGramPushRelay-tweak

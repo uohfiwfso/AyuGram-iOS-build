@@ -1,0 +1,26 @@
+Package: com.ayugram.pushrelay
+Name: AyuGram Push Relay
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Depends: firmware (>= 15.0)
+Maintainer: AyuGram Build <build@ayugram.local>
+Author: AyuGram Build
+Section: Tweak Injection
+Priority: optional
+Description: Relay APNs push from an app that already receives it (App Store
+ Swiftgram or official Telegram) into AyuGram, over a Darwin notification.
+ AyuGram then catches up with the server via a forced getDifference, so chats,
+ counters and message history stay current while it is alive in the background.
+ .
+ The tweak hooks application:didReceiveRemoteNotification:fetchCompletionHandler:
+ and pushRegistry:didReceiveIncomingPushWith:for:completion: and posts the
+ Darwin notification com.ayugram.push.signal. It never breaks the host app:
+ the original methods are called unchanged.
+ .
+ The dylib uses no Substrate or ElleKit symbols - only the Objective-C runtime -
+ so it works with any tweak loader that scans MobileSubstrate/DynamicLibraries
+ (ElleKit, Substitute, libhooker).
+ .
+ After install, edit
+ /var/jb/Library/MobileSubstrate/DynamicLibraries/AyuGramPushRelay.plist
+ and put the bundle id of the host app into the Bundles array.
