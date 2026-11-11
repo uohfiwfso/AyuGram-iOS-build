@@ -76,7 +76,10 @@ jobs:
       - name: Check signature inside deb
         run: |
           rm -rf debcheck && mkdir debcheck
-          cd debcheck && ar x ../Tweak/AyuGramPushRelay/build/deb/*.deb
+          cd debcheck
+          ar x ../Tweak/AyuGramPushRelay/build/deb/*.deb
+          # На macOS ar кладёт члены без бита чтения - без chmod tar их не прочтёт.
+          chmod -R u+rw .
           tar xzf data.tar.gz
           DYLIB=./var/jb/Library/MobileSubstrate/DynamicLibraries/AyuGramPushRelay.dylib
           codesign -dv "$DYLIB" 2>&1 | head -3
