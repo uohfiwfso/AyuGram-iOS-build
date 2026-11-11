@@ -73,7 +73,14 @@ make -C Tweak/AyuGramPushRelay
 [AyuGramRelay] loaded into app.swiftgram.ios (pid 1234)
 [AyuGramRelay] AppDelegate found: AppDelegate
 [AyuGramRelay] hooked application:didReceiveRemoteNotification:fetchCompletionHandler:
+[AyuGramRelay] application did finish launching, installing hooks
 ```
+
+Про `application did finish launching` — это вторая установка хуков.
+Конструктор dylib выполняется до старта приложения, и класс `AppDelegate`
+может быть ещё не зарегистрирован в ObjC-реестре: тогда первый вызов
+ничего не захукает и релей молча не заработает. После запуска приложения
+хуки ставятся ещё раз — поздно, но до первого push.
 
 При приходе push дополнительно показывается локальное уведомление
 «AyuGram relay» — это подтверждает, что перехват работает.
@@ -84,8 +91,18 @@ make -C Tweak/AyuGramPushRelay
   Для чистой сборки AyuGram без Swiftgram/Telegram рядом push не появится —
   там нужен собственный APNs-сертификат (Apple Developer Program, 99$/год)
   и его загрузка в `my.telegram.org/apps`.
-- Darwin-сигнал доставляется живому (foreground/suspended) процессу AyuGram.
-  Если AyuGram был убит системой, сигнал не дойдёт — приложение поднимется
-  при следующем запуске.
+- **Darwin-уведомление не будит приложение.** По ответу Apple DTS
+  (developer.apple.com/forums/thread/769398): «iOS will not resume your app
+  to receive a Darwin notification». Если AyuGram свёрнут и процесс приостановлен,
+  сигнал дойдёт только при следующем возобновлении приложения; если процесс
+  убит — не дойдёт вовсе. На практике это значит: пока AyuGram открыт или
+  висит в фоне, релей работает сразу; при полностью закрытом приложении
+  AyuGram всё равно догонит разницу при следующем открытии.
+- Баннер системного уведомления создаёт **расширение** `NotificationService`
+  (отдельный процесс, запускаемый системой при доставке APNs). Сборка AyuGram
+  собрана с `--disableExtensions`, и push в неё не приходит, поэтому релей
+  обновляет чаты и счётчики, но не показывает баннер — уведомление появится
+  только если AyuGram активен.
 - Подмены текста уведомления на стороне AyuGram нет: AyuGram получает только
   факт прихода push.
+
