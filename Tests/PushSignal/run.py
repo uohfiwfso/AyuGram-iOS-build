@@ -83,6 +83,10 @@ protocol AccountContext: AnyObject {
     var account: Account { get }
 }
 
+final class SharedWakeupManager {
+    func allowBackgroundTimeExtension(timeout: Double, extendNow: Bool = false) {}
+}
+
 final class SharedAccountContextImpl {
     var activeAccountContexts: Signal<(primary: AccountContext?, accounts: [(AccountRecordId, AccountContext, Int32)], currentAuth: UnauthorizedAccount?), NoError> {
         return Signal<(primary: AccountContext?, accounts: [(AccountRecordId, AccountContext, Int32)], currentAuth: UnauthorizedAccount?), NoError> { _ in EmptyDisposable }
@@ -91,8 +95,10 @@ final class SharedAccountContextImpl {
 
 final class SharedApplicationContext {
     let sharedContext: SharedAccountContextImpl
+    let wakeupManager: SharedWakeupManager
     init() {
         self.sharedContext = SharedAccountContextImpl()
+        self.wakeupManager = SharedWakeupManager()
     }
 }
 '''

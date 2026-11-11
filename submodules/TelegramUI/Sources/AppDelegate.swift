@@ -2294,6 +2294,11 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let _ = (self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue).start(next: { [weak self] sharedApplicationContext in
+            // Мы разбужены извне (твик в приложении, у которого есть push).
+            // Дать менеджеру пробуждения время на фоновую обработку, иначе iOS
+            // может прервать сетевой запрос до его завершения.
+            // Тот же приём, что и в application(_:didReceiveRemoteNotification:).
+            sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0)
             self?.pollAyuGramAccountDifference(sharedApplicationContext)
         })
     }
