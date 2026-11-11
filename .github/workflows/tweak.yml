@@ -44,8 +44,32 @@ jobs:
         run: |
           make -C Tweak/AyuGramPushRelay deb
           cp Tweak/AyuGramPushRelay/build/deb/*.deb package/
-          dpkg-deb -I Tweak/AyuGramPushRelay/build/deb/*.deb
-          dpkg-deb -c Tweak/AyuGramPushRelay/build/deb/*.deb
+
+      # На macOS-раннере нет dpkg-deb, поэтому проверяем собранный деб тем же
+      # кодом, которым его собираем: разбор ar-архива и проверка control.
+      - name: Verify deb
+        run: |
+          python3 - <<'PY'
+          import glob, sys
+          sys.path.insert(0, "Tweak/AyuGramPushRelay/packaging")
+          import build_deb
+
+          path = glob.glob("Tweak/AyuGramPushRelay/build/deb/*.deb")[0]
+          raw = open(path, "rb").read()
+          assert raw.startswith(b"!<arch>\n"), "bad ar magic"
+          # Члены ar: заголовок 60 байт, затем содержимое.
+          off = 8
+          names = []
+          while off < len(raw):
+              header = raw[off:off + 60]
+              name = header[0:16].decode().strip()
+              size = int(header[48:58].decode().strip())
+              names.append(name)
+              off += 60 + size + (size % 2)
+          assert names == ["debian-binary", "control.tar.gz", "data.tar.gz"], names
+          print("deb members:", names)
+          print("deb size:", len(raw))
+          PY
 
       - uses: actions/upload-artifact@v4
         with:

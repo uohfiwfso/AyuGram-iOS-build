@@ -42,6 +42,12 @@ install: all
 	@echo "installed into $(INSTALL_DIR), now respring"
 
 # Сборка .deb для установки через Sileo/Zebra или dpkg -i.
+#
+# Собирает packaging/build_deb.py, а не dpkg-deb: на macOS-раннерах GitHub
+# dpkg-deb нет, а ставить dpkg ради одной упаковки смысла нет. Сборщик делает
+# ровно то же, что dpkg-deb -b (ar-архив: debian-binary + control.tar.gz +
+# data.tar.gz), и проверен A/B-тестом с настоящим dpkg-deb: структура
+# data.tar и результат установки совпадают.
 deb: all
 	@rm -rf $(DEB_DIR)
 	@mkdir -p $(STAGE_DIR)/DEBIAN
@@ -54,6 +60,6 @@ deb: all
 	@install -m 755 packaging/postrm $(STAGE_DIR)/DEBIAN/postrm
 	@mkdir -p $(STAGE_DIR)$(ROOTLESS_PREFIX)/usr/share/doc/$(NAME)
 	@install -m 644 README.md $(STAGE_DIR)$(ROOTLESS_PREFIX)/usr/share/doc/$(NAME)/README.md
-	@dpkg-deb --root-owner-group -b $(STAGE_DIR) $(DEB_DIR)/$(DEB_NAME)
+	@python3 packaging/build_deb.py $(STAGE_DIR) $(DEB_DIR)/$(DEB_NAME) $(VERSION) iphoneos-arm64
 	@echo "built $(DEB_DIR)/$(DEB_NAME)"
 

@@ -42,26 +42,6 @@ make -C Tweak/AyuGramPushRelay
 
 ## Установка (rootless, Dopamine / ElleKit)
 
-### Вариант 1: `.deb` (удобнее)
-
-Файл `AyuGramPushRelay_1.0.0_iphoneos-arm64.deb` ставится через Sileo/Zebra
-(«Установить этот .deb») или в терминале:
-
-```bash
-dpkg -i AyuGramPushRelay_1.0.0_iphoneos-arm64.deb
-```
-
-Деб кладёт файлы в rootless-путь `/var/jb/Library/MobileSubstrate/DynamicLibraries/`
-и просит Sileo/Zebra сделать респринг. Если респринга не произошло — сделайте
-его вручную (`killall -9 SpringBoard` или «Перезагрузить интерфейс» в настройках
-джейлбрейка).
-
-После установки нужно указать, в какое приложение грузить твик: отредактируйте
-`/var/jb/Library/MobileSubstrate/DynamicLibraries/AyuGramPushRelay.plist` и
-впишите bundle id приложения-источника.
-
-### Вариант 2: вручную (без dpkg)
-
 1. Взять из артефакта `AyuGramPushRelay.dylib` и `AyuGramPushRelay.plist`.
 2. Скопировать оба файла в
    `/var/jb/Library/MobileSubstrate/DynamicLibraries/`
