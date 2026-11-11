@@ -12,8 +12,7 @@ CFLAGS = -fobjc-arc -Wall -Wno-unused-variable -Wno-objc-method-access \
          $(foreach arch,$(ARCHS),-arch $(arch))
 
 LDFLAGS = -dynamiclib -framework Foundation -framework UIKit -framework UserNotifications \
-          -Wl,-install_name,@rpath/$(TARGET) \
-          -Wl,-undefined,dynamic_lookup
+          -Wl,-install_name,@rpath/$(TARGET)
 
 .PHONY: all clean install
 

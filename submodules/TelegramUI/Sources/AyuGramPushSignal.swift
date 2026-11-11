@@ -1,7 +1,5 @@
 import Foundation
 import CoreFoundation
-import Postbox
-import SwiftSignalKit
 import TelegramCore
 
 /// Имя Darwin-уведомления, которым твик AyuGramPushRelay сообщает AyuGram:
