@@ -376,6 +376,13 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             self.regularDeviceToken.set(.single(token))
         })
         
+        // AyuGram: слушаем сигнал от твика AyuGramPushRelay (приход push в
+        // приложении, которое уже умеет push — Swiftgram / Telegram).
+        AyuGramPushSignal.shared.start()
+        AyuGramPushSignal.shared.setHandler { [weak self] in
+            self?.handleAyuGramPushSignal()
+        }
+        
         let launchStartTime = CFAbsoluteTimeGetCurrent()
         
         defaultNavigationBarImpl = { presentationData in
@@ -2271,6 +2278,28 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         Logger.shared.log("App \(self.episodeId)", "register for notifications: didFailToRegisterForRemoteNotificationsWithError (error: \(error))")
+    }
+    
+    /// AyuGram: реакция на Darwin-сигнал твика AyuGramPushRelay.
+    /// Форсирует разницу с сервером, чтобы догнать обновления, пришедшие
+    /// по push-каналу другого приложения, пока AyuGram был в фоне.
+    private func handleAyuGramPushSignal() {
+        let _ = (self.sharedContextPromise.get()
+        |> take(1)
+        |> deliverOnMainQueue).start(next: { sharedContext in
+            let _ = (sharedContext.activeAccountContexts
+            |> take(1)
+            |> deliverOnMainQueue).start(next: { contexts in
+                guard let primary = contexts.primary else {
+                    return
+                }
+                let _ = primary.account.stateManager.standalonePollDifference().start(
+                    next: { _ in },
+                    error: { _ in },
+                    completed: {}
+                )
+            })
+        })
     }
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {

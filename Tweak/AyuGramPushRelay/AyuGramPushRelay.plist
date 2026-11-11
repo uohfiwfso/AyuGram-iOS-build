@@ -1,0 +1,8 @@
+{
+    Filter = {
+        Bundles = (
+            "app.swiftgram.ios",
+            "org.telegram.messenger"
+        );
+    };
+}

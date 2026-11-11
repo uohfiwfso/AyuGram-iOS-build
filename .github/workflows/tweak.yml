@@ -1,0 +1,43 @@
+name: build-tweak
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - feature/message-saving
+    paths:
+      - 'Tweak/**'
+      - '.github/workflows/tweak.yml'
+
+jobs:
+  build-tweak:
+    name: Build AyuGramPushRelay tweak
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dylib
+        run: make -C Tweak/AyuGramPushRelay
+
+      - name: Ad-hoc sign
+        run: |
+          codesign --force --sign - Tweak/AyuGramPushRelay/build/AyuGramPushRelay.dylib
+          codesign -dv Tweak/AyuGramPushRelay/build/AyuGramPushRelay.dylib 2>&1 | head -5
+
+      - name: Check architecture
+        run: |
+          lipo -info Tweak/AyuGramPushRelay/build/AyuGramPushRelay.dylib
+          otool -l Tweak/AyuGramPushRelay/build/AyuGramPushRelay.dylib | grep -A2 LC_BUILD_VERSION | head -20
+
+      - name: Package
+        run: |
+          mkdir -p package
+          cp Tweak/AyuGramPushRelay/build/AyuGramPushRelay.dylib package/
+          cp Tweak/AyuGramPushRelay/AyuGramPushRelay.plist package/
+          cp Tweak/AyuGramPushRelay/README.md package/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AyuGramPushRelay-tweak
+          path: package/
