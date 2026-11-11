@@ -11,8 +11,9 @@ CFLAGS = -fobjc-arc -Wall -Wno-unused-variable -Wno-objc-method-access \
          -isysroot $(SDK) -miphoneos-version-min=$(MIN_IOS) \
          $(foreach arch,$(ARCHS),-arch $(arch))
 
-LDFLAGS = -framework Foundation -framework UIKit -framework UserNotifications \
-          -Wl,-install_name,@rpath/$(TARGET)
+LDFLAGS = -dynamiclib -framework Foundation -framework UIKit -framework UserNotifications \
+          -Wl,-install_name,@rpath/$(TARGET) \
+          -Wl,-undefined,dynamic_lookup
 
 .PHONY: all clean install
 
