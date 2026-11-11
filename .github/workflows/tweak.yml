@@ -71,6 +71,18 @@ jobs:
           print("deb size:", len(raw))
           PY
 
+      # Dylib внутри пакета должен быть подписан: цель deb пересобирает его
+      # заново, и без подписи в пакет попадёт неподписанный бинарник.
+      - name: Check signature inside deb
+        run: |
+          rm -rf debcheck && mkdir debcheck
+          cd debcheck && ar x ../Tweak/AyuGramPushRelay/build/deb/*.deb
+          tar xzf data.tar.gz
+          DYLIB=./var/jb/Library/MobileSubstrate/DynamicLibraries/AyuGramPushRelay.dylib
+          codesign -dv "$DYLIB" 2>&1 | head -3
+          codesign -v "$DYLIB" && echo "signature OK"
+          cd .. && rm -rf debcheck
+
       - uses: actions/upload-artifact@v4
         with:
           name: AyuGramPushRelay-tweak

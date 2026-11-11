@@ -60,6 +60,13 @@ deb: all
 	@install -m 755 packaging/postrm $(STAGE_DIR)/DEBIAN/postrm
 	@mkdir -p $(STAGE_DIR)$(ROOTLESS_PREFIX)/usr/share/doc/$(NAME)
 	@install -m 644 README.md $(STAGE_DIR)$(ROOTLESS_PREFIX)/usr/share/doc/$(NAME)/README.md
+	@# Подпись ad-hoc обязательна: цель deb пересобирает dylib заново (зависит
+	@# от all), и без этого шага в пакет попал бы неподписанный бинарник.
+	@# postinst на устройстве подпишет через ldid, если он есть, но лучше
+	@# отдать уже подписанный dylib.
+	@if command -v codesign >/dev/null 2>&1; then \
+		codesign --force --sign - $(STAGE_DIR)$(ROOTLESS_PREFIX)/Library/MobileSubstrate/DynamicLibraries/$(TARGET); \
+	fi
 	@python3 packaging/build_deb.py $(STAGE_DIR) $(DEB_DIR)/$(DEB_NAME) $(VERSION) iphoneos-arm64
 	@echo "built $(DEB_DIR)/$(DEB_NAME)"
 
