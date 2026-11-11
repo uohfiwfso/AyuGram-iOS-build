@@ -74,7 +74,7 @@ static void AYUPostSignal(NSString *reason) {
     // двумя sandbox'ами без общих App Group / Keychain entitlements.
     CFNotificationCenterPostNotification(
         CFNotificationCenterGetDarwinNotifyCenter(),
-        CFNotificationName(kAYUSignalName),
+        (__bridge CFNotificationName)kAYUSignalName,
         NULL,
         NULL,
         YES
@@ -120,13 +120,13 @@ static void AYU_hookDidReceiveRemoteNotification(id self,
     AYULog(@"didReceiveRemoteNotification, keys=%@", userInfo.allKeys);
     AYUPostSignal(@"remote-notification");
     AYUPostTestNotification([NSString stringWithFormat:@"Push перехвачен в %@. Сигнал отправлен в AyuGram.",
-                                                      NSBundle.main.bundleIdentifier ?: @"?"]);
+                                                      [[NSBundle mainBundle] bundleIdentifier] ?: @"?"]);
 
     if (g_origDidReceiveRemoteNotification) {
         ((void (*)(id, SEL, UIApplication *, NSDictionary *, AYUBackgroundFetchCompletion))g_origDidReceiveRemoteNotification)(
             self, _cmd, application, userInfo, completionHandler);
     } else if (completionHandler) {
-        completionHandler(.newData);
+        completionHandler(UIBackgroundFetchResultNewData);
     }
 }
 
@@ -164,18 +164,23 @@ static void AYU_hookPushRegistryDidReceiveIncomingPush(id self,
 
 #pragma mark - Swizzling
 
-static BOOL AYUSwizzle(Class cls, SEL original, SEL replacement, IMP *outOriginal) {
+// Подмена IMP существующего метода на C-функцию.
+// method_exchangeImplementations здесь не годится: наши хуки — обычные
+// C-функции, а не Objective-C методы, поэтому ставим реализацию напрямую.
+static BOOL AYUSwizzle(Class cls, SEL original, IMP replacement, IMP *outOriginal) {
     if (cls == nil) {
         return NO;
     }
-    Method orig = class_getInstanceMethod(cls, original);
-    Method repl = class_getInstanceMethod(cls, replacement);
-    if (orig == NULL || repl == NULL) {
+    Method method = class_getInstanceMethod(cls, original);
+    if (method == NULL) {
         return NO;
     }
-    method_exchangeImplementations(orig, repl);
+    IMP originalIMP = method_setImplementation(method, replacement);
+    if (originalIMP == NULL) {
+        return NO;
+    }
     if (outOriginal != NULL) {
-        *outOriginal = method_getImplementation(orig);
+        *outOriginal = originalIMP;
     }
     return YES;
 }
@@ -190,7 +195,7 @@ static void AYUInstallHooks(void) {
 
     if (AYUSwizzle(appDelegate,
                    @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:),
-                   @selector(AYU_hookDidReceiveRemoteNotification:),
+                   (IMP)AYU_hookDidReceiveRemoteNotification,
                    &g_origDidReceiveRemoteNotification)) {
         AYULog(@"hooked application:didReceiveRemoteNotification:fetchCompletionHandler:");
     } else {
@@ -199,7 +204,7 @@ static void AYUInstallHooks(void) {
 
     if (AYUSwizzle(appDelegate,
                    @selector(application:didRegisterForRemoteNotificationsWithDeviceToken:),
-                   @selector(AYU_hookDidRegisterForRemoteNotificationsWithDeviceToken:),
+                   (IMP)AYU_hookDidRegisterForRemoteNotifications,
                    &g_origDidRegisterForRemoteNotifications)) {
         AYULog(@"hooked application:didRegisterForRemoteNotificationsWithDeviceToken:");
     } else {
@@ -208,7 +213,7 @@ static void AYUInstallHooks(void) {
 
     if (AYUSwizzle(appDelegate,
                    @selector(pushRegistry:didReceiveIncomingPushWith:for:completion:),
-                   @selector(AYU_hookPushRegistryDidReceiveIncomingPushWith:for:completion:),
+                   (IMP)AYU_hookPushRegistryDidReceiveIncomingPush,
                    &g_origPushRegistryDidReceiveIncomingPush)) {
         AYULog(@"hooked pushRegistry:didReceiveIncomingPushWith:for:completion:");
     } else {
@@ -219,7 +224,7 @@ static void AYUInstallHooks(void) {
 __attribute__((constructor))
 static void AYUConstructor(void) {
     @autoreleasepool {
-        AYULog(@"loaded into %@ (pid %d)", NSBundle.main.bundleIdentifier ?: @"?", getpid());
+        AYULog(@"loaded into %@ (pid %d)", [[NSBundle mainBundle] bundleIdentifier] ?: @"?", getpid());
         AYUInstallHooks();
     }
 }
