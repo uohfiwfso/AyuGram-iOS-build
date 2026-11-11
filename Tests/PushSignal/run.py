@@ -24,6 +24,7 @@ import tempfile
 root = pathlib.Path(__file__).resolve().parents[2]
 signal_file = root / 'submodules/TelegramUI/Sources/AyuGramPushSignal.swift'
 app_delegate_file = root / 'submodules/TelegramUI/Sources/AppDelegate.swift'
+tweak_file = root / 'Tweak/AyuGramPushRelay/AyuGramPushRelay.m'
 
 # Real SwiftSignalKit sources: the receiver is built on Signal/Promise, and the harness
 # only compiles something meaningful if the real operator semantics are in play.
@@ -56,7 +57,6 @@ def read_production_sources():
 #   activeAccountContexts           -> submodules/TelegramUI/Sources/SharedAccountContext.swift
 STUBS = r'''
 import Foundation
-import SwiftSignalKit
 
 final class Logger {
     static let shared = Logger()
@@ -85,7 +85,7 @@ protocol AccountContext: AnyObject {
 
 final class SharedAccountContextImpl {
     var activeAccountContexts: Signal<(primary: AccountContext?, accounts: [(AccountRecordId, AccountContext, Int32)], currentAuth: UnauthorizedAccount?), NoError> {
-        return Signal { _ in EmptyDisposable }
+        return Signal<(primary: AccountContext?, accounts: [(AccountRecordId, AccountContext, Int32)], currentAuth: UnauthorizedAccount?), NoError> { _ in EmptyDisposable }
     }
 }
 
@@ -102,6 +102,32 @@ HARNESS_CLASS = r'''
 final class AppDelegateHarness {
     private let sharedContextPromise = Promise<SharedApplicationContext>()
 '''
+
+
+def check_signal_name_matches_tweak(signal_source):
+    """The Swift receiver and the Objective-C tweak must agree on the signal name.
+
+    If they disagree, the relay silently does nothing: no crash, no log line,
+    the user just never gets notifications. Both sides hardcode the name, so
+    the only way to catch a mismatch is to compare the two sources.
+    """
+    swift_names = re.findall(r'"(com\.[A-Za-z0-9._-]+)"', signal_source)
+    tweak_names = re.findall(r'@"(com\.[A-Za-z0-9._-]+)"', tweak_file.read_text(encoding='utf-8'))
+
+    if not swift_names:
+        print('--- Darwin signal name: FAILED (no com.* name found in AyuGramPushSignal.swift) ---')
+        return False
+    if not tweak_names:
+        print('--- Darwin signal name: FAILED (no com.* name found in the tweak) ---')
+        return False
+
+    swift_set = set(swift_names)
+    tweak_set = set(tweak_names)
+    print(f'--- Darwin signal name: receiver {sorted(swift_set)} / tweak {sorted(tweak_set)} ---')
+    if swift_set != tweak_set:
+        print('--- Darwin signal name: FAILED (receiver and tweak use different names) ---')
+        return False
+    return True
 
 
 def swiftc_available():
@@ -133,15 +159,17 @@ def compile_check(label, files, extra_args):
 
 
 def main():
+    signal, handler = read_production_sources()
+    name_ok = check_signal_name_matches_tweak(signal)
+
     if not swiftc_available():
         print('swiftc not available - skipping type-check (this runner has no Swift toolchain)')
-        return 0
+        return 0 if name_ok else 1
 
-    signal, handler = read_production_sources()
     sdk, sdk_path_value = sdk_path()
     if sdk is None:
         print('no SDK found - skipping type-check')
-        return 0
+        return 0 if name_ok else 1
 
     target = 'arm64-apple-ios15.0' if sdk == 'iphoneos' else 'arm64-apple-macos12.0'
     sdk_args = ['-sdk', sdk_path_value, '-target', target]
@@ -173,7 +201,7 @@ def main():
 
         probe_signature(sdk_args)
 
-    if not ok:
+    if not ok or not name_ok:
         print('Darwin push-signal receiver: FAILED')
         return 1
     print('Darwin push-signal receiver: type-check passed')
